@@ -1,0 +1,6 @@
+name: eco_wake_sleep_sub
+version: 'v1.0.0'
+main: io.github.ant_cave.eco_wake_sleep_sub.Eco_wake_sleep_sub
+api-version: '1.21'
+authors: [ ANTmmmmm ]
+website: ant-cave.github.io
