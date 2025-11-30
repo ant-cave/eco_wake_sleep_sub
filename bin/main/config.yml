@@ -3,6 +3,8 @@ configVersion: 1
 # s
 timeToWait: 150
 
+serverOnlineTimeToWait: 5
+
 enableAutoWake: true
 enableScript: true
 

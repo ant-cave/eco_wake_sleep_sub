@@ -23,7 +23,6 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.nio.charset.StandardCharsets;
 import java.util.logging.Logger;
 
 enum State {
@@ -39,6 +38,8 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
     State currentStatus = State.SLEEP;// 服务器连接状态
 
     Integer timeToWait;
+    Integer serverOnlineTimeToWait;
+
     boolean enableAutoWake;
     boolean enableScript;
     String mainServerMac;
@@ -84,6 +85,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
      */
     void initConfig() {
         timeToWait = getConfig().getInt("timeToWait", 150);
+        serverOnlineTimeToWait = getConfig().getInt("serverOnlineTimeToWait", 5);
 
         enableAutoWake = getConfig().getBoolean("enableAutoWake", true);
         enableScript = getConfig().getBoolean("enableScript", true);
@@ -105,9 +107,96 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
-        event.getPlayer().sendMessage("Welcome to the server!");
+        event.getPlayer().sendTitle(ChatColor.YELLOW + "检测主服务器状态中", ChatColor.YELLOW + "请稍安勿躁", 5, 20, 5);
+
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+            mainLoop();
+            if (currentStatus == State.WAKE_CONNECTED) {
+                Bukkit.getScheduler().runTask(this, () -> {
+                    event.getPlayer().sendTitle(ChatColor.GREEN + "服务器在线", ChatColor.GREEN + "请勿关闭游戏", 5, 20, 5);
+
+                    // 20tick后开始5秒倒计时
+                    Bukkit.getScheduler().runTaskLater(this, () -> {
+                        startCountdown(event.getPlayer(), 5);
+                    }, 20L); // 20tick = 1秒后执行
+                });
+            } else {
+
+                Bukkit.getScheduler().runTask(this, () -> {
+                    event.getPlayer().sendTitle(ChatColor.RED + "服务器已关闭", ChatColor.RED + "请勿关闭游戏", 5, 20, 5);
+
+                    // 20tick后开始5秒倒计时
+                    Bukkit.getScheduler().runTaskLater(this, () -> {
+                        serverSleepStartCountdown(event.getPlayer(), timeToWait);
+                    }, 20L); // 20tick = 1秒后执行
+                });
+            }
+        });
     }
 
+    private void startCountdown(Player player, int seconds) {
+        if (seconds <= 0) {
+            return;
+        }
+
+        // 显示当前倒计时数字
+        String countdownText = String.valueOf(seconds);
+        player.sendTitle(ChatColor.GREEN + "将在" + ChatColor.YELLOW + countdownText + ChatColor.GREEN + "后传送",
+                ChatColor.GREEN + "服务器在线 请稍安勿躁", 5, 20, 5); // 40tick = 2秒显示时间
+
+        if (seconds > 1) {
+            // 继续倒计时
+            Bukkit.getScheduler().runTaskLater(this, () -> {
+                startCountdown(player, seconds - 1);
+            }, 20L); // 每秒执行一次
+        } else {
+            // 最后一秒结束后的操作
+            Bukkit.getScheduler().runTaskLater(this, () -> {
+                // 倒计时结束后可以清除title或执行其他操作
+                // 倒计时结束，可以执行其他操作
+                player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5); // 40tick = 2秒显示时间
+                player.sendMessage(ChatColor.GREEN + player.getName() + " | " + mainServerName);
+
+                connectPlayerToServer(player, mainServerName);
+            }, 20L);
+        }
+    }
+    private void serverSleepStartCountdown(Player player, int seconds) {
+        // 如果服务器已经连接，直接结束倒计时
+        if (currentStatus == State.WAKE_CONNECTED) {
+            player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5);
+            startCountdown(player, serverOnlineTimeToWait);
+            return;
+        }
+    
+        if (seconds <= 0) {
+            // 倒计时结束，执行最后操作
+            player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5);
+            startCountdown(player, serverOnlineTimeToWait);
+            return;
+        }
+    
+        // 显示当前倒计时数字
+        String countdownText = String.valueOf(seconds);
+        player.sendTitle(ChatColor.YELLOW + "将在" + (Integer.valueOf(countdownText) + serverOnlineTimeToWait) + "后传送",
+                ChatColor.YELLOW + "正在努力唤醒服务器资源", 5, 20, 5);
+    
+        // 每次都尝试唤醒服务器
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+            try {
+                if (currentStatus == State.SLEEP) {
+                    NetworkUtils.wakeOnLan(mainServerMac);
+                }
+            } catch (IOException e) {
+                logger.warning(e.getMessage());
+            }
+        });
+    
+        // 继续倒计时
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            serverSleepStartCountdown(player, seconds - 1);
+        }, 20L);
+    }
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
 
