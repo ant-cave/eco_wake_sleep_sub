@@ -1,0 +1,18 @@
+configVersion: 1
+
+# s
+timeToWait: 150
+
+enableAutoWake: true
+enableScript: true
+
+mainServerMac: 00:00:00:00:00:00
+mainServerIp: 192.168.1.1
+mainServerGamePort: 25565
+
+mainServerName: "main"
+
+# ms
+pingTimeout: 50
+# tick
+pingInterval: 100
