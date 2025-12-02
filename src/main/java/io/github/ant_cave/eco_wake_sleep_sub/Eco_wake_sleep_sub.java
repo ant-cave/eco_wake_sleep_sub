@@ -23,6 +23,11 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.logging.Logger;
 
 enum State {
@@ -36,32 +41,34 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
 
     Logger logger = Bukkit.getLogger();
     State currentStatus = State.SLEEP;// 服务器连接状态
+    State previousStatus = null; // 用于跟踪状态变化
 
-    Integer timeToWait;
-    Integer serverOnlineTimeToWait;
+    Integer cfg_timeToWait;
+    Integer cfg_serverOnlineTimeToWait;
 
-    boolean enableAutoWake;
-    boolean enableScript;
-    String mainServerMac;
-    Integer mainServerGamePort;
-    String mainServerIp;
-    Integer pingTimeout;
-    Integer pingInterval = 5000;
+    boolean cfg_enableAutoWake;
+    boolean cfg_enableScript;
+    String cfg_mainServerMac;
+    Integer cfg_mainServerGamePort;
+    String cfg_mainServerIp;
+    Integer cfg_pingTimeout;
+    Integer cfg_pingInterval = 5000;
 
-    String mainServerName;
+    String cfg_mainServerName;
 
     boolean loop;
 
     @Override
     public void onEnable() {
         // Plugin startup logic
-        logger.info("Eco_wake_sleep_sub is enabled");// 启动提示
+        logger.info("[ecoWakeSleepSub] Eco_wake_sleep_sub is enabled");// 启动提示
 
         loop = true;
 
         saveDefaultConfig();// 保存默认配置文件
         initConfig();
-
+        
+        
         getServer().getPluginManager().registerEvents(this, this);
         getCommand("status").setExecutor(this);
         getCommand("wake").setExecutor(this);
@@ -69,34 +76,35 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
         getCommand("connect").setExecutor(this);
         getCommand("tcping").setExecutor(this);
         getCommand("mcping").setExecutor(this);
+        getCommand("reload").setExecutor(this);
 
         // 注册BungeeCord通道
         this.getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
 
-        logger.info("BungeeCord plugin messaging channels registered");
+        logger.info("[ecoWakeSleepSub] BungeeCord plugin messaging channels registered");
 
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
             mainLoop();
-        }, 0, pingInterval);
+        }, 0, cfg_pingInterval);
     }
 
     /**
      * 初始化配置文件
      */
     void initConfig() {
-        timeToWait = getConfig().getInt("timeToWait", 150);
-        serverOnlineTimeToWait = getConfig().getInt("serverOnlineTimeToWait", 5);
+        cfg_timeToWait = getConfig().getInt("timeToWait", 150);
+        cfg_serverOnlineTimeToWait = getConfig().getInt("serverOnlineTimeToWait", 5);
 
-        enableAutoWake = getConfig().getBoolean("enableAutoWake", true);
-        enableScript = getConfig().getBoolean("enableScript", true);
-        mainServerMac = getConfig().getString("mainServerMac", "00:00:00:00:00:00");
-        mainServerIp = getConfig().getString("mainServerIp", "192.168.1.1");
+        cfg_enableAutoWake = getConfig().getBoolean("enableAutoWake", true);
+        cfg_enableScript = getConfig().getBoolean("enableScript", true);
+        cfg_mainServerMac = getConfig().getString("mainServerMac", "00:00:00:00:00:00");
+        cfg_mainServerIp = getConfig().getString("mainServerIp", "192.168.1.1");
 
-        mainServerGamePort = getConfig().getInt("mainServerGamePort", 25565);
+        cfg_mainServerGamePort = getConfig().getInt("mainServerGamePort", 25565);
 
-        pingInterval = getConfig().getInt("pingInterval", 5000);
-        pingTimeout = getConfig().getInt("pingTimeout", 10);
-        mainServerName = getConfig().getString("mainServerName", "main");
+        cfg_pingInterval = getConfig().getInt("pingInterval", 5000);
+        cfg_pingTimeout = getConfig().getInt("pingTimeout", 10);
+        cfg_mainServerName = getConfig().getString("mainServerName", "main");
 
     }
 
@@ -127,7 +135,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
 
                     // 20tick后开始5秒倒计时
                     Bukkit.getScheduler().runTaskLater(this, () -> {
-                        serverSleepStartCountdown(event.getPlayer(), timeToWait);
+                        serverSleepStartCountdown(event.getPlayer(), cfg_timeToWait);
                     }, 20L); // 20tick = 1秒后执行
                 });
             }
@@ -155,9 +163,9 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
                 // 倒计时结束后可以清除title或执行其他操作
                 // 倒计时结束，可以执行其他操作
                 player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5); // 40tick = 2秒显示时间
-                player.sendMessage(ChatColor.GREEN + player.getName() + " | " + mainServerName);
+                player.sendMessage(ChatColor.GREEN + player.getName() + " | " + cfg_mainServerName);
 
-                connectPlayerToServer(player, mainServerName);
+                connectPlayerToServer(player, cfg_mainServerName);
             }, 20L);
         }
     }
@@ -165,30 +173,30 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
         // 如果服务器已经连接，直接结束倒计时
         if (currentStatus == State.WAKE_CONNECTED) {
             player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5);
-            startCountdown(player, serverOnlineTimeToWait);
+            startCountdown(player, cfg_serverOnlineTimeToWait);
             return;
         }
     
         if (seconds <= 0) {
             // 倒计时结束，执行最后操作
             player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5);
-            startCountdown(player, serverOnlineTimeToWait);
+            startCountdown(player, cfg_serverOnlineTimeToWait);
             return;
         }
     
         // 显示当前倒计时数字
         String countdownText = String.valueOf(seconds);
-        player.sendTitle(ChatColor.YELLOW + "将在" + (Integer.valueOf(countdownText) + serverOnlineTimeToWait) + "后传送",
+        player.sendTitle(ChatColor.YELLOW + "将在" + (Integer.valueOf(countdownText) + cfg_serverOnlineTimeToWait) + "后传送",
                 ChatColor.YELLOW + "正在努力唤醒服务器资源", 5, 20, 5);
     
         // 每次都尝试唤醒服务器
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
             try {
                 if (currentStatus == State.SLEEP) {
-                    NetworkUtils.wakeOnLan(mainServerMac);
+                    NetworkUtils.wakeOnLan(cfg_mainServerMac);
                 }
             } catch (IOException e) {
-                logger.warning(e.getMessage());
+                logger.warning("[ecoWakeSleepSub] " + e.getMessage());
             }
         });
     
@@ -201,17 +209,19 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
 
         if (command.getName().equalsIgnoreCase("status")) {
-            return issueCommandStatus(sender);
+            return cmd_issueCommandStatus(sender);
         } else if (command.getName().equalsIgnoreCase("ping")) {
-            return issueCommandPingAsync(sender, args);
+            return cmd_issueCommandPingAsync(sender, args);
         } else if (command.getName().equalsIgnoreCase("wake")) {
-            return issueCommandWake(sender, args);
+            return cmd_issueCommandWake(sender, args);
         } else if (command.getName().equalsIgnoreCase("connect")) {
-            return issueCommandConnect(sender, args);
+            return cmd_issueCommandConnect(sender, args);
         } else if (command.getName().equalsIgnoreCase("tcping")) {
-            return issueCommandTcpingAsync(sender, args);
+            return cmd_issueCommandTcpingAsync(sender, args);
         } else if (command.getName().equalsIgnoreCase("mcping")) {
-            return issueCommandMcpingAsync(sender, args);
+            return cmd_issueCommandMcpingAsync(sender, args);
+        } else if (command.getName().equalsIgnoreCase("reload")) {
+            return cmd_issueCommandReload(sender);
         }
         return false;
     }
@@ -222,7 +232,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
      * @param sender
      * @return
      */
-    boolean issueCommandStatus(CommandSender sender) {
+    boolean cmd_issueCommandStatus(CommandSender sender) {
         sender.sendMessage("Current plugin state: " + currentStatus.name());
         return true;
     }
@@ -234,13 +244,13 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
      * @param args
      * @return
      */
-    boolean issueCommandPingAsync(CommandSender sender, String[] args) {
+    boolean cmd_issueCommandPingAsync(CommandSender sender, String[] args) {
         final String targetIp;
 
         if (args.length == 1) {
             targetIp = args[0];
         } else if (args.length == 0) {
-            targetIp = mainServerIp;
+            targetIp = cfg_mainServerIp;
         } else {
             sender.sendMessage("Usage: /ping <ip>");
             return false;
@@ -250,7 +260,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
 
         // 使用Bukkit调度器异步执行ping操作
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            boolean result = NetworkUtils.ping(targetIp, pingTimeout);
+            boolean result = NetworkUtils.ping(targetIp, cfg_pingTimeout);
 
             // 回到主线程发送消息
             Bukkit.getScheduler().runTask(this, () -> {
@@ -265,7 +275,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
         return true;
     }
 
-    boolean issueCommandWake(CommandSender sender, String[] args) {
+    boolean cmd_issueCommandWake(CommandSender sender, String[] args) {
         if (args.length == 1) {
             try {
                 NetworkUtils.wakeOnLan(args[0]);
@@ -284,7 +294,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
     /**
      * 处理connect命令
      */
-    boolean issueCommandConnect(CommandSender sender, String[] args) {
+    boolean cmd_issueCommandConnect(CommandSender sender, String[] args) {
         if (args.length < 2) {
             sender.sendMessage("使用方法: /connect <玩家名> <服务器名>");
             return false;
@@ -313,7 +323,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
      * @param args
      * @return
      */
-    boolean issueCommandTcpingAsync(CommandSender sender, String[] args) {
+    boolean cmd_issueCommandTcpingAsync(CommandSender sender, String[] args) {
         final String targetHost;
         final int targetPort;
 
@@ -326,8 +336,8 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
                 return false;
             }
         } else if (args.length == 0) {
-            targetHost = mainServerIp;
-            targetPort = mainServerGamePort;
+            targetHost = cfg_mainServerIp;
+            targetPort = cfg_mainServerGamePort;
         } else {
             sender.sendMessage("使用方法: /tcping <主机> <端口>");
             return false;
@@ -337,7 +347,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
 
         // 使用Bukkit调度器异步执行tcping操作
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            boolean result = NetworkUtils.tcping(targetHost, targetPort, pingTimeout);
+            boolean result = NetworkUtils.tcping(targetHost, targetPort, cfg_pingTimeout);
 
             // 回到主线程发送消息
             Bukkit.getScheduler().runTask(this, () -> {
@@ -359,7 +369,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
      * @param args
      * @return
      */
-    boolean issueCommandMcpingAsync(CommandSender sender, String[] args) {
+    boolean cmd_issueCommandMcpingAsync(CommandSender sender, String[] args) {
         final String targetHost;
         final int targetPort;
 
@@ -373,10 +383,10 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
             }
         } else if (args.length == 1) {
             targetHost = args[0];
-            targetPort = mainServerGamePort;
+            targetPort = cfg_mainServerGamePort;
         } else if (args.length == 0) {
-            targetHost = mainServerIp;
-            targetPort = mainServerGamePort;
+            targetHost = cfg_mainServerIp;
+            targetPort = cfg_mainServerGamePort;
         } else {
             sender.sendMessage("使用方法: /mcping [主机] [端口]");
             return false;
@@ -386,7 +396,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
 
         // 使用Bukkit调度器异步执行mcping操作
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            boolean result = NetworkUtils.mcPing(targetHost, targetPort, pingTimeout);
+            boolean result = NetworkUtils.mcPing(targetHost, targetPort, cfg_pingTimeout);
 
             // 回到主线程发送消息
             Bukkit.getScheduler().runTask(this, () -> {
@@ -398,6 +408,19 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
             });
         });
 
+        return true;
+    }
+
+    /**
+     * 重新加载插件配置
+     * 
+     * @param sender
+     * @return
+     */
+    boolean cmd_issueCommandReload(CommandSender sender) {
+        reloadConfig();
+        initConfig();
+        sender.sendMessage(ChatColor.GREEN + "[ecoWakeSleepSub] 配置已重新加载");
         return true;
     }
 
@@ -414,17 +437,17 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
             out.writeUTF(serverName);
 
             player.sendPluginMessage(this, "BungeeCord", out.toByteArray());
-            logger.info("Connecting player " + player.getName() + " to server " + serverName);
+            logger.info("[ecoWakeSleepSub] Connecting player " + player.getName() + " to server " + serverName);
         } catch (Exception e) {
-            logger.warning("Failed to connect player to server: " + e.getMessage());
+            logger.warning("[ecoWakeSleepSub] Failed to connect player to server: " + e.getMessage());
         }
     }
 
     void mainLoop() {
         // logger.info(ChatColor.YELLOW + "Main loop started");
 
-        if (NetworkUtils.ping(mainServerIp, pingTimeout)) {
-            if (NetworkUtils.mcPing(mainServerIp, mainServerGamePort, pingTimeout)) {
+        if (NetworkUtils.ping(cfg_mainServerIp, cfg_pingTimeout)) {
+            if (NetworkUtils.mcPing(cfg_mainServerIp, cfg_mainServerGamePort, cfg_pingTimeout)) {
                 currentStatus = State.WAKE_CONNECTED;
                 // logger.info("Remote machine is connected");
             } else {
@@ -434,6 +457,12 @@ public final class Eco_wake_sleep_sub extends JavaPlugin implements Listener {
         } else {
             currentStatus = State.SLEEP;
         }
+
+        // 检查状态变化并记录日志
+        if (previousStatus != null && previousStatus != currentStatus) {
+            logger.info("[ecoWakeSleepSub] 状态变化: " + previousStatus.name() + " -> " + currentStatus.name());
+        }
+        previousStatus = currentStatus;
 
         // logger.info("Current status: " + currentStatus);
 
@@ -507,83 +536,96 @@ class NetworkUtils {
         }
     }
 
-    /**
-     * 检测 Minecraft 服务器是否在线并返回状态
-     * 
-     * @param host    服务器主机地址
-     * @param port    服务器端口号
-     * @param timeout 超时时间（毫秒）
-     * @return 服务器是否在线
-     */
-    public static boolean mcPing(String host, int port, int timeout) {
-        Socket socket = null;
-        try {
-            socket = new Socket();
-            socket.connect(new InetSocketAddress(host, port), timeout);
-            DataInputStream input = new DataInputStream(socket.getInputStream());
-            DataOutputStream output = new DataOutputStream(socket.getOutputStream());
+/**
+ * 检测 Minecraft 服务器是否在线并返回状态
+ * 
+ * @param host    服务器主机地址
+ * @param port    服务器端口号
+ * @param timeout 超时时间（毫秒）
+ * @return 服务器是否在线
+ */
+public static boolean mcPing(String host, int port, int timeout) {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+        Future<Boolean> future = executor.submit(() -> mcPingInternal(host, port));
+        return future.get(timeout, TimeUnit.MILLISECONDS);
+    } catch (TimeoutException e) {
+        return false;
+    } catch (Exception e) {
+        return false;
+    } finally {
+        executor.shutdownNow(); // 强制关闭线程池
+    }
+}
 
-            // Protocol version (763 for Minecraft 1.20.4)
-            int protocolVersion = 763;
-            // Next state: 1 for Status
-            int nextState = 1;
+private static boolean mcPingInternal(String host, int port) {
+    Socket socket = null;
+    try {
+        socket = new Socket();
+        socket.connect(new InetSocketAddress(host, port), 5000); // 连接超时5秒
+        DataInputStream input = new DataInputStream(socket.getInputStream());
+        DataOutputStream output = new DataOutputStream(socket.getOutputStream());
 
-            // Build handshake packet
-            ByteArrayOutputStream handshakeBuffer = new ByteArrayOutputStream();
-            writeVarInt(handshakeBuffer, 0x00); // Handshake packet ID
-            writeVarInt(handshakeBuffer, protocolVersion);
-            writeVarInt(handshakeBuffer, host.length());
-            handshakeBuffer.write(host.getBytes("UTF-8"));
-            handshakeBuffer.write((port >> 8) & 0xFF);
-            handshakeBuffer.write(port & 0xFF);
-            writeVarInt(handshakeBuffer, nextState);
+        // 协议版本 (763 对应 Minecraft 1.20.4)
+        int protocolVersion = 763;
+        // 下一状态: 1 表示状态查询
+        int nextState = 1;
 
-            // Write handshake packet with length prefix
-            byte[] handshakeData = handshakeBuffer.toByteArray();
-            ByteArrayOutputStream fullHandshake = new ByteArrayOutputStream();
-            writeVarInt(fullHandshake, handshakeData.length);
-            fullHandshake.write(handshakeData);
-            output.write(fullHandshake.toByteArray());
-            output.flush();
+        // 构建握手数据包
+        ByteArrayOutputStream handshakeBuffer = new ByteArrayOutputStream();
+        writeVarInt(handshakeBuffer, 0x00); // 握手数据包 ID
+        writeVarInt(handshakeBuffer, protocolVersion);
+        writeVarInt(handshakeBuffer, host.length());
+        handshakeBuffer.write(host.getBytes("UTF-8"));
+        handshakeBuffer.write((port >> 8) & 0xFF);
+        handshakeBuffer.write(port & 0xFF);
+        writeVarInt(handshakeBuffer, nextState);
 
-            // Send status request packet
-            ByteArrayOutputStream statusRequest = new ByteArrayOutputStream();
-            writeVarInt(statusRequest, 1); // Length
-            statusRequest.write(0x00); // Packet ID
-            output.write(statusRequest.toByteArray());
-            output.flush();
+        // 写入带长度前缀的握手数据包
+        byte[] handshakeData = handshakeBuffer.toByteArray();
+        ByteArrayOutputStream fullHandshake = new ByteArrayOutputStream();
+        writeVarInt(fullHandshake, handshakeData.length);
+        fullHandshake.write(handshakeData);
+        output.write(fullHandshake.toByteArray());
+        output.flush();
 
-            // Read response
-            int responseLength = readVarInt(input);
-            if (responseLength < 0) {
-                return false;
-            }
+        // 发送状态请求数据包
+        ByteArrayOutputStream statusRequest = new ByteArrayOutputStream();
+        writeVarInt(statusRequest, 1); // 长度
+        statusRequest.write(0x00); // 数据包 ID
+        output.write(statusRequest.toByteArray());
+        output.flush();
 
-            int packetId = readVarInt(input);
-            if (packetId != 0x00) {
-                return false;
-            }
-
-            // Read the actual response data
-            byte[] responseData = new byte[responseLength - getVarIntLength(packetId)];
-            input.readFully(responseData);
-
-            // If we successfully read the response, the server is online
-            return true;
-
-        } catch (IOException e) {
+        // 读取响应
+        int responseLength = readVarInt(input);
+        if (responseLength < 0) {
             return false;
-        } finally {
-            if (socket != null) {
-                try {
-                    socket.close();
-                } catch (IOException e) {
-                    // Ignore close exception
-                }
+        }
+
+        int packetId = readVarInt(input);
+        if (packetId != 0x00) {
+            return false;
+        }
+
+        // 读取实际的响应数据
+        byte[] responseData = new byte[responseLength - getVarIntLength(packetId)];
+        input.readFully(responseData);
+
+        // 如果成功读取响应，则服务器在线
+        return true;
+
+    } catch (Exception e) {
+        return false;
+    } finally {
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (Exception e) {
+                // 忽略关闭异常
             }
         }
     }
-
+}
     /**
      * 写入 VarInt 到输出流
      */
