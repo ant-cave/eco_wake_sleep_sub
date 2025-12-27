@@ -36,6 +36,7 @@ public class PlayerJoinHandler implements Listener {
     private PluginConfig config;
     private PlayerTransferService transferService;
 
+
     public PlayerJoinHandler(Plugin plugin, PluginConfig config, PlayerTransferService transferService) {
         this.plugin = plugin;
         this.config = config;
@@ -63,7 +64,10 @@ public class PlayerJoinHandler implements Listener {
                         transferService.startCountdown(event.getPlayer(), 5);
                     }, 20L);
                 });
-            } else {
+            } 
+            
+            
+            else {
                 // 服务器离线状态处理
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     event.getPlayer().sendTitle(ChatColor.RED + "服务器已关闭", ChatColor.RED + "请勿关闭游戏", 5, 20, 5);

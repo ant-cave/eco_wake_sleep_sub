@@ -34,6 +34,10 @@ commands:
     description: Reload plugin configuration
     usage: /reload
     permission: eco_wake_sleep_sub.reload
+  runningstatus:
+    description: Check remote server running status
+    usage: /runningstatus
+    permission: eco_wake_sleep_sub.runningstatus
 
 permissions:
   eco_wake_sleep_sub.status:
@@ -56,4 +60,7 @@ permissions:
     default: op
   eco_wake_sleep_sub.reload:
     description: Allows the user to reload plugin configuration
+    default: op
+  eco_wake_sleep_sub.runningstatus:
+    description: Allows the user to check remote server running status
     default: op

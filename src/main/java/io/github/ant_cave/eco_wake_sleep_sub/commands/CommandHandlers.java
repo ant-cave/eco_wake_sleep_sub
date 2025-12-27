@@ -42,6 +42,11 @@ public class CommandHandlers {
         return true;
     }
 
+    public boolean runningStatus(CommandSender sender) {
+        sender.sendMessage("远程服务器运行状态: " + ServerState.getRunningStatus().name());
+        return true;
+    }
+
     public boolean ping(CommandSender sender, String[] args) {
         final String targetIp;
 

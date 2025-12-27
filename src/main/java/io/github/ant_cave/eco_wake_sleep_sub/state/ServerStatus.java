@@ -17,33 +17,9 @@
 
 package io.github.ant_cave.eco_wake_sleep_sub.state;
 
-public class ServerState {
-    private static State currentStatus = State.SLEEP;
-    private static State previousStatus = null;
-    private static ServerStatus runningStatus = ServerStatus.SLEEP;
-
-    public static State get() {
-        return currentStatus;
-    }
-
-    public static State getPrevious() {
-        return previousStatus;
-    }
-
-    public static void set(State status) {
-        previousStatus = currentStatus;
-        currentStatus = status;
-    }
-
-    public static boolean hasChanged() {
-        return previousStatus != null && previousStatus != currentStatus;
-    }
-
-    public static ServerStatus getRunningStatus() {
-        return runningStatus;
-    }
-
-    public static void setRunningStatus(ServerStatus status) {
-        runningStatus = status;
-    }
+public enum ServerStatus {
+    SLEEP,       // 启用时默认状态
+    LAUNCHING,   // 从 wake 到 connected 期间
+    RUNNING,     // connected 后的状态
+    SHUTTING     // 从 WAKE_CONNECTED -> WAKE 后，持续 15 秒
 }

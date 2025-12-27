@@ -22,6 +22,7 @@ import io.github.ant_cave.eco_wake_sleep_sub.config.PluginConfig;
 import io.github.ant_cave.eco_wake_sleep_sub.events.PlayerJoinHandler;
 import io.github.ant_cave.eco_wake_sleep_sub.service.PlayerTransferService;
 import io.github.ant_cave.eco_wake_sleep_sub.state.ServerState;
+import io.github.ant_cave.eco_wake_sleep_sub.state.ServerStatus;
 import io.github.ant_cave.eco_wake_sleep_sub.state.State;
 import io.github.ant_cave.eco_wake_sleep_sub.utils.NetworkUtils;
 
@@ -36,12 +37,11 @@ public final class Eco_wake_sleep_sub extends JavaPlugin {
     private PlayerTransferService transferService;
     private CommandHandlers commandHandlers;
     private PlayerJoinHandler joinHandler;
-    private boolean loop;
+    private Integer sleepTime = 0;
 
     @Override
     public void onEnable() {
         Bukkit.getLogger().info("[ecoWakeSleepSub] Eco_wake_sleep_sub is enabled");
-        loop = true;
 
         saveDefaultConfig();
         config = new PluginConfig(getConfig());
@@ -57,6 +57,7 @@ public final class Eco_wake_sleep_sub extends JavaPlugin {
         getCommand("tcping").setExecutor(this);
         getCommand("mcping").setExecutor(this);
         getCommand("reload").setExecutor(this);
+        getCommand("runningstatus").setExecutor(this);
 
         this.getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
         Bukkit.getLogger().info("[ecoWakeSleepSub] BungeeCord plugin messaging channels registered");
@@ -84,11 +85,14 @@ public final class Eco_wake_sleep_sub extends JavaPlugin {
             return commandHandlers.mcping(sender, args);
         } else if (command.getName().equalsIgnoreCase("reload")) {
             return commandHandlers.reload(sender);
+        } else if (command.getName().equalsIgnoreCase("runningstatus")) {
+            return commandHandlers.runningStatus(sender);
         }
         return false;
     }
 
     private void mainLoop() {
+        
         if (NetworkUtils.ping(config.mainServerIp, config.pingTimeout)) {
             if (NetworkUtils.mcPing(config.mainServerIp, config.mainServerGamePort, config.pingTimeout)) {
                 ServerState.set(State.WAKE_CONNECTED);
@@ -99,8 +103,49 @@ public final class Eco_wake_sleep_sub extends JavaPlugin {
             ServerState.set(State.SLEEP);
         }
 
+        // 处理 runningStatus 状态转换
         if (ServerState.hasChanged()) {
-            getLogger().info("[ecoWakeSleepSub] 状态变化: " + ServerState.getPrevious().name() + " -> " + ServerState.get().name());
+            State currStatus = ServerState.get();
+            State prev = ServerState.getPrevious();
+            
+            // SLEEP -> WAKE: 进入 LAUNCHING
+            if (prev == State.SLEEP && currStatus == State.WAKE) {
+                ServerState.setRunningStatus(ServerStatus.LAUNCHING);
+                sleepTime = 0;
+            }
+            // WAKE_CONNECTED -> WAKE: 进入 SHUTTING
+            else if (prev == State.WAKE_CONNECTED && currStatus == State.WAKE) {
+                ServerState.setRunningStatus(ServerStatus.SHUTTING);
+                sleepTime = 0;
+            }
+            // 其他状态变化重置 sleepTime
+            else if (currStatus == State.SLEEP) {
+                sleepTime = 0;
+            }
+        }
+
+        // 状态保持时的处理
+        if (!ServerState.hasChanged()) {
+            State curr = ServerState.get();
+            
+            // WAKE_CONNECTED -> RUNNING
+            if (curr == State.WAKE_CONNECTED && ServerState.getRunningStatus() == ServerStatus.LAUNCHING) {
+                ServerState.setRunningStatus(ServerStatus.RUNNING);
+            }
+            // SHUTTING 计时 15 秒后回到 SLEEP
+            else if (curr == State.SLEEP && ServerState.getRunningStatus() == ServerStatus.SHUTTING) {
+                if (sleepTime < 15) {
+                    sleepTime++;
+                } else {
+                    ServerState.setRunningStatus(ServerStatus.SLEEP);
+                    sleepTime = 0;
+                }
+            }
+        }
+
+        if (ServerState.hasChanged()) {
+            getLogger().info(
+                    "[ecoWakeSleepSub] 状态变化: " + ServerState.getPrevious().name() + " -> " + ServerState.get().name());
         }
     }
 }
