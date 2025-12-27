@@ -31,18 +31,32 @@ import org.bukkit.plugin.Plugin;
 import java.io.IOException;
 import java.util.logging.Logger;
 
+/**
+ * 玩家传输服务类，负责处理玩家在不同服务器间的传输以及服务器唤醒逻辑
+ */
 public class PlayerTransferService {
 
     private Plugin plugin;
     private PluginConfig config;
     private Logger logger;
 
+    /**
+     * 构造玩家传输服务实例
+     * @param plugin 插件实例
+     * @param config 插件配置
+     * @param logger 日志记录器
+     */
     public PlayerTransferService(Plugin plugin, PluginConfig config, Logger logger) {
         this.plugin = plugin;
         this.config = config;
         this.logger = logger;
     }
 
+    /**
+     * 连接玩家到指定服务器
+     * @param player 要连接的玩家
+     * @param serverName 目标服务器名称
+     */
     public void connectPlayer(Player player, String serverName) {
         try {
             ByteArrayDataOutput out = ByteStreams.newDataOutput();
@@ -55,43 +69,36 @@ public class PlayerTransferService {
         }
     }
 
+    /**
+     * 开始倒计时传送玩家
+     * @param player 要传送的玩家
+     * @param seconds 倒计时秒数
+     */
     public void startCountdown(Player player, int seconds) {
-        if (seconds <= 0) {
-            return;
+        for (int i = seconds; i > 0; i--) {
+            final int currentSec = i;
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                String countdownText = String.valueOf(currentSec);
+                player.sendTitle(ChatColor.GREEN + "将在" + ChatColor.YELLOW + countdownText + ChatColor.GREEN + "后传送",
+                        ChatColor.GREEN + "服务器在线 请稍安勿躁", 5, 20, 5);
+            }, (seconds - i) * 20L);
         }
 
-        String countdownText = String.valueOf(seconds);
-        player.sendTitle(ChatColor.GREEN + "将在" + ChatColor.YELLOW + countdownText + ChatColor.GREEN + "后传送",
-                ChatColor.GREEN + "服务器在线 请稍安勿躁", 5, 20, 5);
-
-        if (seconds > 1) {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                startCountdown(player, seconds - 1);
-            }, 20L);
-        } else {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5);
-                player.sendMessage(ChatColor.GREEN + player.getName() + " | " + config.mainServerName);
-                connectPlayer(player, config.mainServerName);
-            }, 20L);
-        }
+        // 倒计时结束后执行传送
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5);
+            player.sendMessage(ChatColor.GREEN + player.getName() + " | " + config.mainServerName);
+            connectPlayer(player, config.mainServerName);
+        }, seconds * 20L);
     }
 
+    /**
+     * 服务器休眠启动倒计时
+     * @param player 需要传送的玩家
+     * @param seconds 倒计时秒数
+     */
     public void serverSleepStartCountdown(Player player, int seconds) {
-        if (checkServerConnected(player)) {
-            return;
-        }
-
-        if (seconds <= 0) {
-            player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5);
-            startCountdown(player, config.serverOnlineTimeToWait);
-            return;
-        }
-
-        String countdownText = String.valueOf(seconds);
-        player.sendTitle(ChatColor.YELLOW + "将在" + (Integer.valueOf(countdownText) + config.serverOnlineTimeToWait) + "后传送",
-                ChatColor.YELLOW + "正在努力唤醒服务器资源", 5, 20, 5);
-
+        // 异步尝试唤醒服务器（只发一次）
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 if (isServerSleeping()) {
@@ -102,11 +109,36 @@ public class PlayerTransferService {
             }
         });
 
+        // 每秒检查一次服务器状态并显示倒计时
+        for (int i = 0; i < seconds; i++) {
+            final int currentTick = i;
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (checkServerConnected(player)) {
+                    return;
+                }
+
+               // 显示剩余总等待时间
+                int remainingSec = seconds - currentTick;
+                int totalWaitSec = remainingSec + config.serverOnlineTimeToWait;
+                player.sendTitle(ChatColor.YELLOW + "将在" + totalWaitSec + "后传送",
+                        ChatColor.YELLOW + "正在努力唤醒服务器资源", 5, 20, 5);
+            }, i * 20L);
+        }
+
+        // 倒计时结束后进入传送流程
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            serverSleepStartCountdown(player, seconds - 1);
-        }, 20L);
+            if (!checkServerConnected(player)) {
+                player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5);
+                startCountdown(player, config.serverOnlineTimeToWait);
+            }
+        }, seconds * 20L);
     }
 
+    /**
+     * 检查服务器是否已连接
+     * @param player 玩家对象
+     * @return 如果服务器已连接返回true，否则返回false
+     */
     private boolean checkServerConnected(Player player) {
         if (isServerConnected()) {
             player.sendTitle(ChatColor.GREEN + "正在传送", ChatColor.GREEN + "请稍安勿躁", 5, 20, 5);
@@ -116,11 +148,19 @@ public class PlayerTransferService {
         return false;
     }
 
+    /**
+     * 检查服务器是否已连接
+     * @return 如果服务器已连接返回true，否则返回false
+     */
     private boolean isServerConnected() {
         return NetworkUtils.ping(config.mainServerIp, config.pingTimeout)
                 && NetworkUtils.mcPing(config.mainServerIp, config.mainServerGamePort, config.pingTimeout);
     }
 
+    /**
+     * 检查服务器是否处于休眠状态
+     * @return 如果服务器休眠返回true，否则返回false
+     */
     private boolean isServerSleeping() {
         return !NetworkUtils.ping(config.mainServerIp, config.pingTimeout);
     }
