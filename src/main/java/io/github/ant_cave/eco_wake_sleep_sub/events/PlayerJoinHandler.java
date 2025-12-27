@@ -20,6 +20,7 @@ package io.github.ant_cave.eco_wake_sleep_sub.events;
 import io.github.ant_cave.eco_wake_sleep_sub.config.PluginConfig;
 import io.github.ant_cave.eco_wake_sleep_sub.service.PlayerTransferService;
 import io.github.ant_cave.eco_wake_sleep_sub.state.ServerState;
+import io.github.ant_cave.eco_wake_sleep_sub.state.ServerStatus;
 import io.github.ant_cave.eco_wake_sleep_sub.state.State;
 import io.github.ant_cave.eco_wake_sleep_sub.utils.NetworkUtils;
 import net.md_5.bungee.api.ChatColor;
@@ -44,6 +45,17 @@ public class PlayerJoinHandler implements Listener {
     }
 
     /**
+     * 处理玩家离开事件
+     * 清理传送状态
+     * 
+     * @param event 玩家离开事件对象
+     */
+    @EventHandler
+    public void onPlayerQuit(org.bukkit.event.player.PlayerQuitEvent event) {
+        transferService.removeTransferringPlayer(event.getPlayer());
+    }
+
+    /**
      * 处理玩家加入事件
      * 当玩家加入服务器时，检测主服务器状态并根据状态显示相应信息，启动相应的倒计时转移服务
      * 
@@ -56,26 +68,38 @@ public class PlayerJoinHandler implements Listener {
         // 异步执行服务器状态检测
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             checkServerStatus();
-            if (ServerState.get() == State.WAKE_CONNECTED) {
-                // 服务器在线状态处理
-                Bukkit.getScheduler().runTask(plugin, () -> {
+            ServerStatus status = ServerState.getRunningStatus();
+            
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (status == ServerStatus.RUNNING) {
+                    // 服务器在线状态处理
                     event.getPlayer().sendTitle(ChatColor.GREEN + "服务器在线", ChatColor.GREEN + "请勿关闭游戏", 5, 20, 5);
                     Bukkit.getScheduler().runTaskLater(plugin, () -> {
                         transferService.startCountdown(event.getPlayer(), 5);
                     }, 20L);
-                });
-            } 
-            
-            
-            else {
-                // 服务器离线状态处理
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    event.getPlayer().sendTitle(ChatColor.RED + "服务器已关闭", ChatColor.RED + "请勿关闭游戏", 5, 20, 5);
+                } 
+                else if (status == ServerStatus.SLEEP) {
+                    // sleep阶段：服务器正在开机
+                    event.getPlayer().sendTitle(ChatColor.YELLOW + "服务器正在开机", ChatColor.YELLOW + "请稍等片刻", 5, 20, 5);
                     Bukkit.getScheduler().runTaskLater(plugin, () -> {
                         transferService.serverSleepStartCountdown(event.getPlayer(), config.timeToWait);
                     }, 20L);
-                });
-            }
+                }
+                else if (status == ServerStatus.LAUNCHING) {
+                    // launch阶段：已经开机，正在开服
+                    event.getPlayer().sendTitle(ChatColor.GOLD + "已经开机", ChatColor.GOLD + "正在开服...", 5, 20, 5);
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        transferService.serverLaunchStartCountdown(event.getPlayer(), config.timeToWait);
+                    }, 20L);
+                }
+                else if (status == ServerStatus.SHUTTING) {
+                    // shutting阶段：来得不巧，刚刚关机
+                    event.getPlayer().sendTitle(ChatColor.RED + "来得不巧", ChatColor.RED + "服务器刚刚关机", 5, 20, 5);
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        transferService.serverShuttingStartCountdown(event.getPlayer(), config.timeToWait);
+                    }, 20L);
+                }
+            });
         });
     }
 
