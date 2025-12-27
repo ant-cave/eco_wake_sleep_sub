@@ -42,13 +42,21 @@ public class PlayerJoinHandler implements Listener {
         this.transferService = transferService;
     }
 
+    /**
+     * 处理玩家加入事件
+     * 当玩家加入服务器时，检测主服务器状态并根据状态显示相应信息，启动相应的倒计时转移服务
+     * 
+     * @param event 玩家加入事件对象
+     */
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         event.getPlayer().sendTitle(ChatColor.YELLOW + "检测主服务器状态中", ChatColor.YELLOW + "请稍安勿躁", 5, 20, 5);
 
+        // 异步执行服务器状态检测
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             checkServerStatus();
             if (ServerState.get() == State.WAKE_CONNECTED) {
+                // 服务器在线状态处理
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     event.getPlayer().sendTitle(ChatColor.GREEN + "服务器在线", ChatColor.GREEN + "请勿关闭游戏", 5, 20, 5);
                     Bukkit.getScheduler().runTaskLater(plugin, () -> {
@@ -56,6 +64,7 @@ public class PlayerJoinHandler implements Listener {
                     }, 20L);
                 });
             } else {
+                // 服务器离线状态处理
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     event.getPlayer().sendTitle(ChatColor.RED + "服务器已关闭", ChatColor.RED + "请勿关闭游戏", 5, 20, 5);
                     Bukkit.getScheduler().runTaskLater(plugin, () -> {
@@ -66,7 +75,13 @@ public class PlayerJoinHandler implements Listener {
         });
     }
 
+    /**
+     * 检查服务器状态并更新服务器状态
+     * 通过ping和mcPing检测主服务器的连接状态，设置相应的服务器状态
+     * 并在状态发生变化时记录日志
+     */
     private void checkServerStatus() {
+        // 检测主服务器IP是否可达，如果可达则进一步检测游戏端口连接状态
         if (NetworkUtils.ping(config.mainServerIp, config.pingTimeout)) {
             if (NetworkUtils.mcPing(config.mainServerIp, config.mainServerGamePort, config.pingTimeout)) {
                 ServerState.set(State.WAKE_CONNECTED);
@@ -77,8 +92,10 @@ public class PlayerJoinHandler implements Listener {
             ServerState.set(State.SLEEP);
         }
 
+        // 检查服务器状态是否发生变化，如果变化则记录状态转换日志
         if (ServerState.hasChanged()) {
-            Bukkit.getLogger().info("[ecoWakeSleepSub] 状态变化: " + ServerState.getPrevious().name() + " -> " + ServerState.get().name());
+            Bukkit.getLogger().info(
+                    "[ecoWakeSleepSub] 状态变化: " + ServerState.getPrevious().name() + " -> " + ServerState.get().name());
         }
     }
 }
